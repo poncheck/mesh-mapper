@@ -35,13 +35,21 @@ def decode_protobuf_packet(payload):
         
         packet = service_envelope.packet
         
-        # Check if from_node exists
-        if not packet.from_node or packet.from_node == 0:
+        # Get node_id from packet.from or service_envelope.gatewayId
+        node_id = None
+        if packet.from_node and packet.from_node != 0:
+            node_id = format_node_id(packet.from_node)
+        elif service_envelope.gatewayId:
+            node_id = service_envelope.gatewayId  # Already in !xxxxxxxx format
+        elif service_envelope.channel_id:
+            node_id = service_envelope.channel_id
+        
+        if not node_id:
             return {"error": "from_node"}
         
         decoded = {
-            "id": packet.id,
-            "from": format_node_id(packet.from_node),
+            "id": packet.id if packet.id else None,
+            "from": node_id,
             "to": format_node_id(packet.to_node) if packet.to_node else None,
             "channel": packet.channel,
             "rx_time": packet.rx_time if packet.rx_time else None,
