@@ -42,15 +42,22 @@ def decode_protobuf_packet(payload):
         if packet.from_node and packet.from_node != 0:
             node_id = format_node_id(packet.from_node)
         else:
-            # Get gateway_id from ServiceEnvelope (field #3, index 2)
+            # Get gateway_id from ServiceEnvelope fields
             fields = service_envelope.ListFields()
+            print(f"🔍 Fields count: {len(fields)}")
+            for idx, (field_desc, value) in enumerate(fields):
+                print(f"  [{idx}] {field_desc.name} = {value if not isinstance(value, bytes) else '<bytes>'}")
+                
             if len(fields) >= 3:
-                # Field 2 is gateway_id (string like "!ea8ee750")
+                # Field 2 should be gateway_id
                 gateway_id = fields[2][1]
+                print(f"  ✅ Field[2] value: {gateway_id}, type: {type(gateway_id)}")
                 if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith('!'):
                     node_id = gateway_id
+                    print(f"  ✅ Using gateway_id: {node_id}")
         
         if not node_id:
+            print(f"❌ No node_id found!")
             return {"error": "from_node"}
         
         decoded = {
