@@ -31,7 +31,11 @@ def decode_protobuf_packet(payload):
     """Dekoduje pakiet protobuf Meshtastic"""
     try:
         service_envelope = mqtt_pb2.ServiceEnvelope()
-        service_envelope.ParseFromString(payload)
+        try:
+            service_envelope.ParseFromString(payload)
+        except Exception as e:
+            print(f"❌ Protobuf ParseFromString error: {e}")
+            return {"error": f"Protobuf ParseFromString error: {e}"}
         
         packet = service_envelope.packet
         
