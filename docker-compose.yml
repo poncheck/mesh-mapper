@@ -1,4 +1,23 @@
 services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: mesh-mapper-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=meshuser
+      - POSTGRES_PASSWORD=meshpass
+      - POSTGRES_DB=meshmapper
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   mqtt-worker:
     build: ./mqtt_worker
     container_name: mqtt-worker
@@ -8,10 +27,16 @@ services:
       - MQTT_PORT=1883
       - MQTT_TOPIC=msh/#
       - LOG_PATH=/logs/mqtt_raw.log
+      - DATABASE_URL=postgresql://meshuser:meshpass@db:5432/meshmapper
     volumes:
       - ./logs:/logs
+    depends_on:
+      - db
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  db_data:

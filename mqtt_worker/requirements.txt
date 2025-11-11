@@ -2,3 +2,4 @@ paho-mqtt==1.6.1
 meshtastic==2.3.0
 protobuf==4.25.1
 h3==3.7.6
+psycopg2-binary==2.9.9
