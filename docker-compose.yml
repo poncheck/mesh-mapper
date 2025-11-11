@@ -1,0 +1,17 @@
+services:
+  mqtt-worker:
+    build: ./mqtt_worker
+    container_name: mqtt-worker
+    restart: unless-stopped
+    environment:
+      - MQTT_HOST=192.168.88.30
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=msh/#
+      - LOG_PATH=/logs/mqtt_raw.log
+    volumes:
+      - ./logs:/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
