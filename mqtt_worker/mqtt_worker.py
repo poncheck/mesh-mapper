@@ -35,32 +35,22 @@ def decode_protobuf_packet(payload):
         
         packet = service_envelope.packet
         
-        # DEBUG: Print all fields in service_envelope
-        print(f"🔍 ServiceEnvelope fields: {service_envelope.ListFields()}")
-        
-        # Get node_id from packet.from or service_envelope.gateway_id
+        # Get node_id from packet.from_node or from ServiceEnvelope fields
         node_id = None
+        
+        # First try packet.from_node
         if packet.from_node and packet.from_node != 0:
             node_id = format_node_id(packet.from_node)
-            print(f"✅ Got node_id from packet.from_node: {node_id}")
-        elif hasattr(service_envelope, 'gateway_id') and service_envelope.gateway_id:
-            # gateway_id is bytes, decode to string
-            try:
-                node_id = service_envelope.gateway_id.decode('utf-8') if isinstance(service_envelope.gateway_id, bytes) else service_envelope.gateway_id
-                print(f"✅ Got node_id from gateway_id: {node_id}")
-            except Exception as e:
-                node_id = str(service_envelope.gateway_id)
-                print(f"⚠️  gateway_id decode error: {e}, using str: {node_id}")
-        elif hasattr(service_envelope, 'channel_id') and service_envelope.channel_id:
-            try:
-                node_id = service_envelope.channel_id.decode('utf-8') if isinstance(service_envelope.channel_id, bytes) else service_envelope.channel_id
-                print(f"✅ Got node_id from channel_id: {node_id}")
-            except Exception as e:
-                node_id = str(service_envelope.channel_id)
-                print(f"⚠️  channel_id decode error: {e}, using str: {node_id}")
+        else:
+            # Get gateway_id from ServiceEnvelope (field #3, index 2)
+            fields = service_envelope.ListFields()
+            if len(fields) >= 3:
+                # Field 2 is gateway_id (string like "!ea8ee750")
+                gateway_id = fields[2][1]
+                if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith('!'):
+                    node_id = gateway_id
         
         if not node_id:
-            print(f"❌ No node_id found in packet or envelope!")
             return {"error": "from_node"}
         
         decoded = {
