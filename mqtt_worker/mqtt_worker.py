@@ -38,20 +38,28 @@ def decode_protobuf_packet(payload):
         # Get node_id from packet.from_node or from ServiceEnvelope fields
         node_id = None
         
-        # First try packet.from_node
-        if packet.from_node and packet.from_node != 0:
-            node_id = format_node_id(packet.from_node)
-        else:
+        # First try packet.from or packet.from_node
+        try:
+            from_val = getattr(packet, 'from', None) or getattr(packet, 'from_node', None)
+            if from_val and from_val != 0:
+                node_id = format_node_id(from_val)
+                print(f"✅ Got node_id from packet.from: {node_id}")
+        except Exception as e:
+            print(f"⚠️  Error accessing packet.from: {e}")
+        
+        if not node_id:
             # Get gateway_id from ServiceEnvelope fields
+            print(f"🔍 Trying ServiceEnvelope fields...")
             fields = service_envelope.ListFields()
-            print(f"🔍 Fields count: {len(fields)}")
+            print(f"  Fields count: {len(fields)}")
             for idx, (field_desc, value) in enumerate(fields):
-                print(f"  [{idx}] {field_desc.name} = {value if not isinstance(value, bytes) else '<bytes>'}")
+                val_str = str(value)[:100] if not isinstance(value, bytes) else '<bytes>'
+                print(f"  [{idx}] {field_desc.name} = {val_str}")
                 
             if len(fields) >= 3:
                 # Field 2 should be gateway_id
                 gateway_id = fields[2][1]
-                print(f"  ✅ Field[2] value: {gateway_id}, type: {type(gateway_id)}")
+                print(f"  Field[2] value: {gateway_id}, type: {type(gateway_id)}")
                 if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith('!'):
                     node_id = gateway_id
                     print(f"  ✅ Using gateway_id: {node_id}")
