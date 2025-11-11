@@ -135,10 +135,25 @@ def decode_json_packet(payload):
         return {"error": str(e)}
 
 async def init_db():
-    """Initialize database connection pool"""
+    """Initialize database connection pool with retry logic"""
     global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    print("✅ Database connection pool initialized")
+    max_retries = 5
+    retry_delay = 3
+    
+    for attempt in range(max_retries):
+        try:
+            db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10, timeout=10)
+            print("✅ Database connection pool initialized")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"⚠️  Database connection attempt {attempt + 1}/{max_retries} failed: {e}")
+                print(f"   Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+            else:
+                print(f"❌ Failed to connect to database after {max_retries} attempts")
+                print(f"   Worker will continue without database support (file logging only)")
+                db_pool = None
 
 async def save_event_to_db(event):
     """Save event to database"""
