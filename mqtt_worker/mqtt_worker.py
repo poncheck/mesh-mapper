@@ -27,114 +27,73 @@ def format_node_id(node_id_int):
     # Remove leading 0x and add ! prefix
     return f"!{node_id_int:08x}"
 
-def decode_protobuf_packet(payload):
+def decode_protobuf_packet(payload, topic):
     """Dekoduje pakiet protobuf Meshtastic"""
     try:
-        service_envelope = mqtt_pb2.ServiceEnvelope()
-        try:
-            service_envelope.ParseFromString(payload)
-        except Exception as e:
-            print(f"❌ Protobuf ParseFromString error: {e}")
-            return {"error": f"Protobuf ParseFromString error: {e}"}
-        
-        packet = service_envelope.packet
-        
-        # Get node_id from packet.from_node or from ServiceEnvelope fields
-        node_id = None
-        
-        # First try packet.from or packet.from_node
-        try:
-            from_val = getattr(packet, 'from', None) or getattr(packet, 'from_node', None)
-            if from_val and from_val != 0:
-                node_id = format_node_id(from_val)
-                print(f"✅ Got node_id from packet.from: {node_id}")
-        except Exception as e:
-            print(f"⚠️  Error accessing packet.from: {e}")
-        
-        if not node_id:
-            # Get gateway_id from ServiceEnvelope fields
-            print(f"🔍 Trying ServiceEnvelope fields...")
-            fields = service_envelope.ListFields()
-            print(f"  Fields count: {len(fields)}")
-            for idx, (field_desc, value) in enumerate(fields):
-                val_str = str(value)[:100] if not isinstance(value, bytes) else '<bytes>'
-                print(f"  [{idx}] {field_desc.name} = {val_str}")
-                
-            if len(fields) >= 3:
-                # Field 2 should be gateway_id
-                gateway_id = fields[2][1]
-                print(f"  Field[2] value: {gateway_id}, type: {type(gateway_id)}")
-                if gateway_id and isinstance(gateway_id, str) and gateway_id.startswith('!'):
-                    node_id = gateway_id
-                    print(f"  ✅ Using gateway_id: {node_id}")
-        
-        if not node_id:
-            print(f"❌ No node_id found!")
-            return {"error": "from_node"}
-        
-        decoded = {
-            "id": packet.id if packet.id else None,
-            "from": node_id,
-            "to": format_node_id(packet.to_node) if packet.to_node else None,
-            "channel": packet.channel,
-            "rx_time": packet.rx_time if packet.rx_time else None,
-            "rx_snr": packet.rx_snr if packet.HasField("rx_snr") else None,
-            "rx_rssi": packet.rx_rssi if packet.HasField("rx_rssi") else None,
-            "hop_limit": packet.hop_limit if packet.hop_limit else None,
-            "hop_start": packet.hop_start if packet.hop_start else None,
-            "want_ack": packet.want_ack if packet.want_ack else False,
-        }
-        
-        # Dekodowanie payload w zależności od port_num
-        if packet.HasField("decoded"):
-            decoded["port_num"] = packet.decoded.portnum
+        # /e/ (encrypted) topic contains MeshPacket
+        if "/e/" in topic:
+            packet = mesh_pb2.MeshPacket()
+            packet.ParseFromString(payload)
             
-            # Position data
-            if packet.decoded.portnum == portnums_pb2.POSITION_APP:
-                try:
+            if not packet.from_node or packet.from_node == 0:
+                return {"error": "from_node_empty"}
+            
+            decoded = {
+                "id": packet.id if packet.id else None,
+                "from": format_node_id(packet.from_node),
+                "to": format_node_id(packet.to_node) if packet.to_node else None,
+                "channel": packet.channel,
+                "rx_time": packet.rx_time if packet.rx_time else None,
+                "rx_snr": packet.rx_snr if packet.HasField("rx_snr") else None,
+                "rx_rssi": packet.rx_rssi if packet.HasField("rx_rssi") else None,
+                "hop_limit": packet.hop_limit if packet.hop_limit else None,
+                "hop_start": packet.hop_start if packet.hop_start else None,
+                "want_ack": packet.want_ack if packet.want_ack else False,
+            }
+            
+            if packet.HasField("decoded"):
+                decoded["port_num"] = packet.decoded.portnum
+                
+                if packet.decoded.portnum == portnums_pb2.POSITION_APP:
                     pos = mesh_pb2.Position()
                     pos.ParseFromString(packet.decoded.payload)
                     lat = pos.latitude_i * 1e-7 if pos.latitude_i else None
                     lon = pos.longitude_i * 1e-7 if pos.longitude_i else None
-                    
                     if lat and lon and lat != 0 and lon != 0:
                         decoded["position"] = {
-                            "latitude": lat,
-                            "longitude": lon,
-                            "altitude": pos.altitude if pos.altitude else None,
-                            "time": pos.time if pos.time else None,
+                            "latitude": lat, "longitude": lon,
+                            "altitude": pos.altitude, "time": pos.time
                         }
-                except Exception as e:
-                    print(f"⚠️ Position decode error: {e}")
+                
+                elif packet.decoded.portnum == portnums_pb2.TRACEROUTE_APP:
+                    route = mesh_pb2.RouteDiscovery()
+                    route.ParseFromString(packet.decoded.payload)
+                    decoded["traceroute"] = [format_node_id(node) for node in route.route]
             
-            # Telemetry data
-            elif packet.decoded.portnum == portnums_pb2.TELEMETRY_APP:
-                try:
-                    telemetry = telemetry_pb2.Telemetry()
-                    telemetry.ParseFromString(packet.decoded.payload)
-                    decoded["telemetry"] = {
-                        "time": telemetry.time if telemetry.time else None,
-                    }
-                    if telemetry.HasField("device_metrics"):
-                        decoded["telemetry"]["device_metrics"] = {
-                            "battery_level": telemetry.device_metrics.battery_level,
-                            "voltage": telemetry.device_metrics.voltage,
-                            "channel_utilization": telemetry.device_metrics.channel_utilization,
-                            "air_util_tx": telemetry.device_metrics.air_util_tx,
-                        }
-                except Exception as e:
-                    print(f"⚠️ Telemetry decode error: {e}")
+            return decoded
+
+        # /c/ (cleartext) topic contains ServiceEnvelope
+        elif "/c/" in topic:
+            service_envelope = mqtt_pb2.ServiceEnvelope()
+            service_envelope.ParseFromString(payload)
+            packet = service_envelope.packet
             
-            # Text message
-            elif packet.decoded.portnum == portnums_pb2.TEXT_MESSAGE_APP:
-                try:
-                    decoded["text"] = packet.decoded.payload.decode('utf-8', errors='ignore')
-                except Exception as e:
-                    print(f"⚠️ Text decode error: {e}")
-        
-        return decoded
+            node_id = None
+            if packet.from_node and packet.from_node != 0:
+                node_id = format_node_id(packet.from_node)
+            elif service_envelope.gateway_id:
+                node_id = service_envelope.gateway_id
+            
+            if not node_id:
+                return {"error": "gateway_id_empty"}
+            
+            # Pozostała logika dla ServiceEnvelope (jeśli potrzebna)
+            return {"from": node_id, "type": "service_envelope"}
+
+        return {"error": "unknown_protobuf_topic"}
+
     except Exception as e:
-        return {"error": f"Error parsing message: {str(e)}"}
+        return {"error": f"Protobuf parsing error: {str(e)}"}
 
 def decode_json_packet(payload):
     """Dekoduje pakiet JSON Meshtastic"""
@@ -258,7 +217,7 @@ def on_message(client, userdata, msg):
     if "/json/" in msg.topic:
         decoded = decode_json_packet(msg.payload)
     elif "/e/" in msg.topic or "/c/" in msg.topic:
-        decoded = decode_protobuf_packet(msg.payload)
+        decoded = decode_protobuf_packet(msg.payload, msg.topic)
     
     # Logowanie zdekodowanego pakietu
     if decoded:
