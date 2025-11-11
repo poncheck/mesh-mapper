@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import h3
 import paho.mqtt.client as mqtt
 from meshtastic import mesh_pb2, mqtt_pb2, portnums_pb2, telemetry_pb2
 
@@ -9,6 +10,8 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "msh/#")
 LOG_PATH = os.getenv("LOG_PATH", "/logs/mqtt_raw.log")
 DECODED_LOG_PATH = os.getenv("DECODED_LOG_PATH", "/logs/mqtt_decoded.log")
+HEX_EVENTS_PATH = os.getenv("HEX_EVENTS_PATH", "/logs/hex_events.jsonl")
+H3_RESOLUTION = int(os.getenv("H3_RESOLUTION", "8"))
 
 def decode_protobuf_packet(payload):
     """Dekoduje pakiet protobuf Meshtastic"""
@@ -104,6 +107,7 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    timestamp_unix = int(time.time())
     
     # Logowanie surowego pakietu (hex)
     payload_hex = msg.payload.hex()
@@ -126,9 +130,42 @@ def on_message(client, userdata, msg):
         with open(DECODED_LOG_PATH, "a") as f:
             f.write(decoded_line)
         
-        # Wydruk na konsoli jeśli pakiet zawiera pozycję
-        if "position" in decoded and decoded["position"].get("latitude"):
-            print(f"📍 Position: {decoded.get('from')} at {decoded['position']['latitude']:.6f}, {decoded['position']['longitude']:.6f}")
+        # Mapowanie na H3 i zapis zdarzenia per hex
+        if "position" in decoded and decoded["position"].get("latitude") and decoded["position"].get("longitude"):
+            lat = decoded["position"]["latitude"]
+            lon = decoded["position"]["longitude"]
+            
+            # Konwersja lat/lon na hex H3
+            try:
+                hex_id = h3.geo_to_h3(lat, lon, H3_RESOLUTION)
+                
+                # Utworzenie strukturalnego zdarzenia
+                event = {
+                    "timestamp": timestamp_unix,
+                    "timestamp_iso": ts,
+                    "node_id": decoded.get("from"),
+                    "hex_id": hex_id,
+                    "latitude": lat,
+                    "longitude": lon,
+                    "altitude": decoded["position"].get("altitude"),
+                    "packet_type": decoded.get("port_num", "unknown"),
+                    "rssi": decoded.get("rx_rssi"),
+                    "snr": decoded.get("rx_snr"),
+                    "hop_limit": decoded.get("hop_limit"),
+                    "topic": msg.topic,
+                    "raw_payload": payload_hex,
+                }
+                
+                # Zapis do pliku hex_events.jsonl (JSON Lines - każda linia to osobny JSON)
+                os.makedirs(os.path.dirname(HEX_EVENTS_PATH), exist_ok=True)
+                with open(HEX_EVENTS_PATH, "a") as f:
+                    f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                
+                # Wydruk na konsoli
+                print(f"📍 {decoded.get('from')} @ {lat:.6f},{lon:.6f} → H3: {hex_id}")
+                
+            except Exception as e:
+                print(f"⚠️  H3 mapping error: {e}")
 
 if __name__ == "__main__":
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
